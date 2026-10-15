@@ -1,0 +1,39 @@
+name: Publish release
+
+# Brick's private CI force-pushes each main build (brick.apk + latest.json) to the `drop` branch.
+# This turns it into a GitHub Release; the app's updater reads releases/latest/download/latest.json.
+on:
+  push:
+    branches: [drop]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: drop
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .versionName latest.json)
+          gh release create "v$version" brick.apk latest.json --repo "$GITHUB_REPOSITORY" \
+            --target main --title "Brick $version" --notes "Brick $version" --latest
+
+      # Keep the newest 10 releases; older APKs aren't needed to update.
+      - name: Prune old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[10:][] | .tagName' |
+            while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
